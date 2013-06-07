@@ -133,8 +133,8 @@ function awesompd.split(s)
    s = s .. "\n"
    local f = function (s) 
                 l.n = l.n + 1
-		l[l.n] = s
-	     end
+        l[l.n] = s
+         end
    local p = "%s*(.-)%s*\n%s*"
    s = string.gsub(s,p,f)
    return l
@@ -365,6 +365,14 @@ function awesompd:command_play_specific(n)
           end
 end
 
+function awesompd:command_search(term)
+    return function()
+        self:command_read("search artist " .. n)
+    end
+end
+
+
+
 function awesompd:command_volume_up()
    return function()
              self:command("volume +5")
@@ -467,6 +475,14 @@ function awesompd:command_show_menu()
                                        { "Artist", self:menu_jamendo_search_by(jamendo.SEARCH_ARTIST) },
                                        { "Album", self:menu_jamendo_search_by(jamendo.SEARCH_ALBUM) },
                                        { "Tag", self:menu_jamendo_search_by(jamendo.SEARCH_TAG) }}} }
+
+            local search_menu = {
+                                       { "Any"        , self:menu_mpc_search_by("any")    },
+                                       { "Artist"     , self:menu_mpc_search_by("artist") },
+                                       { "Album"      , self:menu_mpc_search_by("album")  },
+                                       { "Song Title" , self:menu_mpc_search_by("title")  },
+                                       { "Genre"      , self:menu_mpc_search_by("genre")  }
+                                 }
             local browse_menu = self:menu_jamendo_browse()
             if browse_menu then 
                table.insert(jamendo_menu, browse_menu)
@@ -477,6 +493,7 @@ function awesompd:command_show_menu()
             new_menu = { { "Playback", self:menu_playback() },
                          { "Options", self:menu_options() },
                          { "List", self:menu_list() },
+                         { "Search", search_menu },
                          { "Playlists", self:menu_playlists() },
                          { "Jamendo", jamendo_menu } }
          end 
@@ -562,7 +579,7 @@ function awesompd:menu_list()
    end
    return self.list_menu
 end
-	     
+         
 -- Returns the playlists menu. Menu consists of all files in the playlist folder.
 function awesompd:menu_playlists()
    if self.recreate_playlists then
@@ -743,6 +760,27 @@ function awesompd:menu_jamendo_order()
    return self.jamendo_order_menu
 end
 
+function awesompd:menu_mpc_search_by(what)
+   return function()
+             local callback = 
+                function(s)
+                   local result = search_by(what, s)
+                   if result then
+                      local track_count = table.getn(result.tracks)
+                      self:add_mpc_tracks(result.tracks)
+                      self:add_hint(format("%s \"%s\" was found",
+                                           what, result.search_res.name),
+                                    format("Added %s tracks to the playlist",
+                                           track_count))
+                   else
+                      self:add_hint("Search failed",
+                                    format("%s \"%s\" was not found", what, s))
+                   end
+                end
+             self:display_inputbox("Search MPD for " .. what .. ":", what, callback)
+          end
+end
+
 function awesompd:menu_jamendo_search_by(what)
    return function()
              local callback = 
@@ -775,9 +813,9 @@ function awesompd:check_list()
    if info ~= self.list_line then
       self.list_line = info
       if string.len(info) > 0 then
-	 self.list_array = self.split(string.sub(info,1,string.len(info)))
+     self.list_array = self.split(string.sub(info,1,string.len(info)))
       else
-	 self.list_array = {}
+     self.list_array = {}
       end
       self.recreate_menu = true
       self.recreate_list = true
@@ -792,9 +830,9 @@ function awesompd:check_playlists()
    if info ~= self.playlists_line then
       self.playlists_line = info
       if string.len(info) > 0 then
-	 self.playlists_array = self.split(info)
+     self.playlists_array = self.split(info)
       else
-	 self.playlists_array = {}
+     self.playlists_array = {}
       end
       self.recreate_menu = true
       self.recreate_playlists = true
@@ -826,9 +864,9 @@ end
 function awesompd:show_notification(hint_title, hint_text, hint_image)
    self:hide_notification()
    self.notification = naughty.notify({ title      =  hint_title
-					, text       = awesompd.protect_string(hint_text)
-					, timeout    = 5
-					, position   = "top_right"
+                    , text       = awesompd.protect_string(hint_text)
+                    , timeout    = 5
+                    , position   = "top_right"
                                         , icon       = hint_image
                                         , icon_size  = self.album_cover_size
                                      })
@@ -856,10 +894,10 @@ end
 
 function awesompd:notify_state(state_changed)
    state_array = { "Volume: " .. self.state_volume ,
-		   "Repeat: " .. self.state_repeat ,
-		   "Random: " .. self.state_random ,
-		   "Single: " .. self.state_single ,
-		   "Consume: " .. self.state_consume }
+           "Repeat: " .. self.state_repeat ,
+           "Random: " .. self.state_random ,
+           "Single: " .. self.state_single ,
+           "Consume: " .. self.state_consume }
    state_header = state_array[state_changed]
    table.remove(state_array,state_changed)
    full_state = state_array[1]
@@ -874,6 +912,11 @@ function awesompd:wrap_output(text)
                  self.font, self.font_color, self.background,
                  (text == "" and "" or self.ldecorator), awesompd.protect_string(text),
                  (text == "" and "" or self.rdecorator))
+end
+
+function awesompd:mpcquery()
+   return "mpc -h " .. self.servers[self.current_server].server .. 
+      " -p " .. self.servers[self.current_server].port .. " "
 end
 
 -- This function actually sets the text on the widget.
@@ -954,32 +997,37 @@ function awesompd:update_track(file)
    end
 
    if not track_line or string.len(track_line) == 0 then
+   -- nothing returned
       if self.status ~= awesompd.DISCONNECTED then
-	 self:notify_disconnect()
-	 self.recreate_menu = true
+         self:notify_disconnect()
+         self.recreate_menu = true
          self.status = awesompd.DISCONNECTED
          self.current_track = { }
          self:update_widget_text()
       end
    else
+   -- got a track_line back from "mpc status"
       if self.status == awesompd.DISCONNECTED then
-	 self:notify_connect()
-	 self.recreate_menu = true
+      -- have we dc'ed?
+         self:notify_connect()
+         self.recreate_menu = true
          self:update_widget_text()
       end
       if string.find(track_line,"volume:") or string.find(track_line,"Updating DB") then
-	 if self.status ~= awesompd.STOPPED then
-            self.status = awesompd.STOPPED
-	    self.current_number = 0
-	    self.recreate_menu = true
-	    self.recreate_playback = true
-	    self.recreate_list = true
-            self.album_cover = nil
-            self.current_track = { }
-            self:update_widget_text()
-	 end
+      -- when does this happen?  TODO
+         if self.status ~= awesompd.STOPPED then
+                self.status = awesompd.STOPPED
+                self.current_number = 0
+                self.recreate_menu = true
+                self.recreate_playback = true
+                self.recreate_list = true
+                self.album_cover = nil
+                self.current_track = { }
+                self:update_widget_text()
+         end
          self:update_state(track_line)
       else
+      -- playing normally, get info
          self:update_state(options_line)
          local _, _, new_file, station, title, artist, album =
             string.find(track_line, "(.*)%-<>%-(.*)%-<>%-(.*)%-<>%-(.*)%-<>%-(.*)")
@@ -1007,11 +1055,11 @@ function awesompd:update_track(file)
             if self.show_album_cover then
                self.current_track.album_cover = self:get_cover(new_file)
             end
-	    self.to_notify = true
-	    self.recreate_menu = true
-	    self.recreate_playback = true
-	    self.recreate_list = true
-	    self.current_number = tonumber(self.find_pattern(status_line,"%d+"))
+            self.to_notify = true
+            self.recreate_menu = true
+            self.recreate_playback = true
+            self.recreate_list = true
+            self.current_number = tonumber(self.find_pattern(status_line,"%d+"))
             self:update_widget_text()
 
             -- If the track is not the last, asynchronously download
@@ -1023,20 +1071,20 @@ function awesompd:update_track(file)
                                     self.current_number + 1 .. ' | tail -1', "*line")
                jamendo.try_get_cover_async(next_track)
             end
-	 end
-	 local tmp_pst = string.find(status_line,"%d+%:%d+%/")
-	 local progress = self.find_pattern(status_line,"%#%d+/%d+") .. " " .. string.sub(status_line,tmp_pst)
+         end
+         local tmp_pst = string.find(status_line,"%d+%:%d+%/")
+         local progress = self.find_pattern(status_line,"%#%d+/%d+") .. " " .. string.sub(status_line,tmp_pst)
          local new_status = awesompd.PLAYING
-	 if string.find(status_line,"paused") then
-            new_status = awesompd.PAUSED
-	 end
-	 if new_status ~= self.status then
-	    self.to_notify = true
-	    self.recreate_list = true
+         if string.find(status_line,"paused") then
+                new_status = awesompd.PAUSED
+         end
+         if new_status ~= self.status then
+            self.to_notify = true
+            self.recreate_list = true
             self.status = new_status
             self:update_widget_text()
-	 end
-	 self.status_text = self.status .. " " .. progress
+         end
+         self.status_text = self.status .. " " .. progress
       end
    end
 end
@@ -1075,8 +1123,8 @@ end
 
 function awesompd:run_prompt(welcome,hook)
    awful.prompt.run({ prompt = welcome },
-		    self.promptbox[mouse.screen].widget,
-		    hook)
+            self.promptbox[mouse.screen].widget,
+            hook)
 end
 
 -- Replaces control characters with escaped ones.
@@ -1226,3 +1274,5 @@ function awesompd:command_toggle()
 end
 
 return awesompd
+
+-- vim:tabstop=3:shiftwidth=3:expandtab

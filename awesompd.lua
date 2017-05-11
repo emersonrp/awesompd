@@ -209,14 +209,18 @@ function awesompd:create()
    instance.show_album_cover = true
    instance.album_cover_size = 50
    instance.browser = "firefox"
-   
--- Widget configuration
+-- Smart Update (sets timer to check/update widget near when the current track should end)
+   instance.track_position = "00:00"
+   instance.track_duration = "00:00"
+   instance.smart_update_timer = timer({ timeout = instance.update_interval })
+   -- Widget configuration
    instance.widget:connect_signal("mouse::enter", function(c)
-                                                 instance:notify_track()
-                                              end)
+	    instance:update_track()
+	    instance:notify_track()
+	 end)
    instance.widget:connect_signal("mouse::leave", function(c)
-                                                 instance:hide_notification()
-                                              end)
+	    instance:hide_notification()
+	 end)
    return instance
 end
 
@@ -984,6 +988,11 @@ function awesompd:notify_disconnect()
 		 " on port " .. self.servers[self.current_server].port)
 end
 
+local function to_seconds(minsec)
+   local min, sec = minsec:match("(%d+):(%d+)")
+   return tonumber(min) * 60 + tonumber(sec)
+end
+
 function awesompd:update_track(file)
    local file_exists = (file ~= nil)
    if not file_exists then
@@ -1073,6 +1082,7 @@ function awesompd:update_track(file)
             end
          end
          local tmp_pst = string.find(status_line,"%d+%:%d+%/")
+         self.track_position, self.track_duration = status_line:match("(%d+:%d+)/(%d+:%d+)")
          local progress = self.find_pattern(status_line,"%#%d+/%d+") .. " " .. string.sub(status_line,tmp_pst)
          local new_status = awesompd.PLAYING
          if string.find(status_line,"paused") then
@@ -1085,6 +1095,29 @@ function awesompd:update_track(file)
             self:update_widget_text()
          end
          self.status_text = self.status .. " " .. progress
+      end
+   end
+   self:smart_update()
+end
+
+function awesompd:smart_update()
+   -- Kill any set timers
+   if self.smart_update_timer.started then
+      self.smart_update_timer:stop()
+   end
+   if (self.status == awesompd.PLAYING) then
+      local pos = to_seconds(self.track_position)
+      local dur = to_seconds(self.track_duration)
+      local rem = (dur - pos) + 1
+      if (rem < self.update_interval) then
+	 -- Little time remaining, lets update when it runs out 
+	 local smart_timer = timer({ timeout = rem })
+	 smart_timer:connect_signal("timeout", function()
+	    smart_timer:stop()
+	    self:update_track()
+	 end)
+	 self.smart_update_timer = smart_timer
+	 smart_timer:start()
       end
    end
 end
@@ -1131,11 +1164,7 @@ end
 -- for_menu - defines if the special escable table for menus should be
 -- used.
 function awesompd.protect_string(str, for_menu)
-   if for_menu then
-      return utf8.replace(str, awesompd.ESCAPE_MENU_SYMBOL_MAPPING)
-   else
-      return utf8.replace(str, awesompd.ESCAPE_SYMBOL_MAPPING)
-   end
+	  return awful.util.escape(str)
 end
 
 -- Initialize the inputbox.
@@ -1219,7 +1248,7 @@ function awesompd:try_get_local_cover(current_file)
       local result
       -- First find the music directory in MPD configuration file
       local _, _, music_folder = string.find(
-         self.pread('cat ' .. self.mpd_config .. ' | grep -v "#" | grep music_directory', "*line"),
+         self.pread('cat ' .. self.mpd_config .. ' | grep -v ^"#" | grep music_directory', "*line"),
          'music_directory%s+"(.+)"')
       music_folder = music_folder .. "/"
       

@@ -918,11 +918,6 @@ function awesompd:wrap_output(text)
                  (text == "" and "" or self.rdecorator))
 end
 
-function awesompd:mpcquery()
-   return "mpc -h " .. self.servers[self.current_server].server .. 
-      " -p " .. self.servers[self.current_server].port .. " "
-end
-
 -- This function actually sets the text on the widget.
 function awesompd:set_text(text)
    self.text_widget:set_markup(self:wrap_output(text))
